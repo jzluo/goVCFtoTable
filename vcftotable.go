@@ -102,7 +102,7 @@ func VCFtoTable(fileName, outFile string, threads int) {
 	defer f.Close()
 	defer gz.Close()
 
-	writer.WriteString("Var_ID\tPT_ID\tGT\tGQ\tAD_REF\tAD_ALT\tDP\tFT\tCompound\n")
+	writer.WriteString("Var_ID\tPT_ID\tGT\tGQ\tAD_REF\tAD_ALT\tDP\tFT\n")
 
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -131,7 +131,8 @@ func ProcessVariant(row []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numSamples int, varID []byte) {
 	var start int
 	het := []byte{49}
-	cmp := []byte("CMPND")
+	cmp := []byte("CMPNA")
+	cmp2 := []byte(";CMPNA")
 	hom := []byte{50}
 	// comma := []byte(",")
 	tab := []byte("\t")
@@ -140,7 +141,7 @@ func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 
 	for i := 0; i < numSamples; i++ {
 		var call, gt []byte
-		var compound bool
+		compound := false
 		call, start = GetNextCol(calls, start, 0, '\t')
 
 		if call[0] == 48 && call[2] == 48 { // 0/0
@@ -156,8 +157,8 @@ func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 			compound = true
 		} else {
 			fmt.Println(string(call[:3]))
+			fmt.Println(string(varID))
 			panic("wtf is this")
-			os.Exit(10)
 		}
 
 		dp, ad_ref, ad_alt, gq, ft := GetFormatFields(call)
@@ -165,10 +166,11 @@ func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 			ad_ref = zero
 		}
 		if compound {
+			ft = ft[:len(ft):len(ft)] // allocate new slice to avoid overwrite of original backing array (calls)
 			if len(ft) == 0 {
 				ft = cmp
 			} else if len(ft) > 0 {
-				ft = append(ft, ";CMPND"...)
+				ft = append(ft, cmp2...)
 			}
 		}
 
