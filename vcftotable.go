@@ -67,13 +67,14 @@ func ReadVCFgz(filename string, threads int) (*bufio.Reader, *os.File, *bgzf.Rea
 
 	gz, err := bgzf.NewReader(f, threads)
 	if err != nil {
-		fmt.Println("Error reading file")
+		fmt.Println("Error decompressing file")
 		os.Exit(1)
 	}
 
 	reader := bufio.NewReader(gz)
 
 	for {
+		// Read until the last header line and return samples
 		line, err := reader.ReadBytes('\n')
 		if err != nil {
 			fmt.Println("Error parsing VCF file")
@@ -82,6 +83,7 @@ func ReadVCFgz(filename string, threads int) (*bufio.Reader, *os.File, *bgzf.Rea
 		}
 
 		if bytes.HasPrefix(line, []byte("#CHROM")) {
+			line = line[:len(line)-1]
 			sampleNames, numSamples := ParseSampleNames(line)
 			return reader, f, gz, sampleNames, numSamples
 		}
@@ -89,7 +91,6 @@ func ReadVCFgz(filename string, threads int) (*bufio.Reader, *os.File, *bgzf.Rea
 }
 
 func VCFtoTable(fileName, outFile string, threads int) {
-
 	reader, f, gz, sampleNames, numSamples := ReadVCFgz(fileName, threads)
 	file, err := os.Create(outFile)
 	if err != nil {
@@ -99,10 +100,10 @@ func VCFtoTable(fileName, outFile string, threads int) {
 
 	writer := bufio.NewWriter(file)
 	defer writer.Flush()
-	defer f.Close()
 	defer gz.Close()
+	defer f.Close()
 
-	writer.WriteString("Var_ID\tPT_ID\tGT\tGQ\tAD_REF\tAD_ALT\tDP\tFT\n")
+	//writer.WriteString("Var_ID\tPT_ID\tGT\tGQ\tAD_REF\tAD_ALT\tDP\tFT\n") // write header
 
 	for {
 		line, err := reader.ReadBytes('\n')
@@ -112,6 +113,7 @@ func VCFtoTable(fileName, outFile string, threads int) {
 			fmt.Println(err)
 			os.Exit(1)
 		}
+		line = line[:len(line)-1] // strip \n
 		ProcessVariant(line, writer, sampleNames, numSamples)
 	}
 }
@@ -128,13 +130,14 @@ func ProcessVariant(row []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 	ProcessCalls(row[start:], writer, sampleNames, numSamples, varID)
 }
 
+// ProcessCalls loops through every sample's call and skips WT or no-calls (including monoallelic sites from GLnexus atm)
+//
 func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numSamples int, varID []byte) {
 	var start int
 	het := []byte{49}
-	cmp := []byte("CMPNA")
-	cmp2 := []byte(";CMPNA")
+	cmp := []byte("CMPND")
+	cmp2 := []byte(";CMPND")
 	hom := []byte{50}
-	// comma := []byte(",")
 	tab := []byte("\t")
 	newline := []byte("\n")
 	zero := []byte{48}
@@ -166,7 +169,8 @@ func ProcessCalls(calls []byte, writer *bufio.Writer, sampleNames [][]byte, numS
 			ad_ref = zero
 		}
 		if compound {
-			ft = ft[:len(ft):len(ft)] // allocate new slice to avoid overwrite of original backing array (calls)
+			// allocate new slice to avoid overwriting of the original backing array (calls)
+			ft = ft[:len(ft):len(ft)]
 			if len(ft) == 0 {
 				ft = cmp
 			} else if len(ft) > 0 {
@@ -202,11 +206,14 @@ func ParseSampleNames(line []byte) ([][]byte, int) {
 	return sampleNames, len(sampleNames)
 }
 
+// GetNextCol returns the index of the next delimiter and the subslice from a starting index to the delimiter.
+// The skip parameter allows for the skipping of a number of "columns"
 func GetNextCol(row []byte, start int, skip int, delim byte) ([]byte, int) {
 	for i := 0; i < skip; i++ {
 		start = bytes.IndexByte(row[start:], delim) + start + 1
 	}
 	nextTabPos := bytes.IndexByte(row[start:], delim)
+	// if end of line reached, return the remainder of the byte slice
 	if nextTabPos == -1 {
 		return row[start:], 0
 	}
